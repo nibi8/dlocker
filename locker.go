@@ -8,7 +8,11 @@ import (
 	"github.com/nibi8/dlocker/models"
 )
 
-const lockCtxLrKey = "github.com/nibi8/dlocker/lock_ctx_lr_key"
+type contextKey string
+
+const (
+	lockLrContextKey contextKey = "lock_ctx_lr_key"
+)
 
 type LockerImp struct {
 	sp StorageProvider
@@ -44,7 +48,13 @@ func (s *LockerImp) LockWithWait(
 	}
 
 	if lrFound && lr.State.IsLock() && lr.DurationSec > 0 {
-		time.Sleep(time.Duration(lr.DurationSec) * time.Second)
+		dur := time.Duration(lr.DurationSec) * time.Second
+		select {
+		case <-ctx.Done():
+			return lockCtx, cancel, ctx.Err()
+		case <-time.After(dur):
+			// continue
+		}
 	}
 
 	if !lrFound {
@@ -85,7 +95,7 @@ func (s *LockerImp) Unlock(
 	lockCtx context.Context,
 ) (err error) {
 
-	val := lockCtx.Value(lockCtxLrKey)
+	val := lockCtx.Value(lockLrContextKey)
 	if val == nil {
 		return nil
 	}
@@ -114,7 +124,7 @@ func newLockCtx(
 ) (lockCtx context.Context, cancel context.CancelFunc) {
 
 	lockCtx, cancel = context.WithTimeout(ctx, time.Duration(lock.ExecutionDurationSec)*time.Second)
-	lockCtx = context.WithValue(lockCtx, lockCtxLrKey, lr)
+	lockCtx = context.WithValue(lockCtx, lockLrContextKey, lr)
 
 	return lockCtx, cancel
 }
