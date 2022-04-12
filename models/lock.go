@@ -8,7 +8,7 @@ type Lock struct {
 	// Unique lock name
 	Name string
 
-	// Duration of lock in seconds
+	// Duration of lock in seconds (TTL)
 	ExecutionDurationSec int
 
 	// Interval between locks execution in seconds
