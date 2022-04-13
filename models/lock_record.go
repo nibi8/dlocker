@@ -60,8 +60,8 @@ func NewLockRecordPatchForCapture(
 
 func NewLockRecordPatchForRelease(curVersion string) LockRecordPatch {
 	patch := LockRecordPatch{
-		Version:     curVersion,
-		DurationSec: 1,
+		Version:     curVersion, // todo: ? new version
+		DurationSec: 1,          // todo: ? set to 0
 		State:       LockRecordStateUnlock,
 		Dt:          time.Now(),
 	}
