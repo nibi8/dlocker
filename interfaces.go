@@ -35,7 +35,7 @@ type StorageProvider interface {
 	) (err error)
 
 	// Updates LockRecord with new values or return error ErrNotFound if not found or unexpected error.
-	// ErrNotSupported returns in case storage does not support updates and created lock record expires (for example Redis values)
+	// Returns ErrNotSupported in case storage does not support updates (in this case storage must handle ttl)
 	UpdateLockRecord(
 		ctx context.Context,
 		jobName string,
