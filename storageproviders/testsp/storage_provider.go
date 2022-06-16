@@ -28,8 +28,8 @@ type MemLock struct {
 	Lr   models.LockRecord
 }
 
-func NewMemLock(lr models.LockRecord) *MemLock {
-	return &MemLock{
+func NewMemLock(lr models.LockRecord) MemLock {
+	return MemLock{
 		Lock: &sync.Mutex{},
 		Lr:   lr,
 	}
@@ -45,7 +45,7 @@ func (sp *StorageProvider) GetLockRecord(
 		return lr, models.ErrNotFound
 	}
 
-	jl, ok := value.(*MemLock)
+	jl, ok := value.(MemLock)
 	if !ok {
 		return lr, fmt.Errorf("cast error")
 	}
@@ -78,8 +78,7 @@ func (sp *StorageProvider) UpdateLockRecord(
 	if !ok {
 		return models.ErrNotFound
 	}
-
-	jl, ok := value.(*MemLock)
+	jl, ok := value.(MemLock)
 	if !ok {
 		return fmt.Errorf("cast error")
 	}
@@ -87,11 +86,23 @@ func (sp *StorageProvider) UpdateLockRecord(
 	jl.Lock.Lock()
 	defer jl.Lock.Unlock()
 
+	// reread
+	value, ok = sp.locks.Load(lockName)
+	if !ok {
+		return models.ErrNotFound
+	}
+	jl, ok = value.(MemLock)
+	if !ok {
+		return fmt.Errorf("cast error")
+	}
+
 	if jl.Lr.Version != version {
 		return models.ErrNoLuck
 	}
 
 	jl.Lr.ApplyPatch(patch)
+
+	sp.locks.Store(lockName, jl)
 
 	return nil
 }

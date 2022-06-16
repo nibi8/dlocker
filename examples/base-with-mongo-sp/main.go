@@ -67,6 +67,10 @@ func main() {
 	if err != nil {
 		log.Fatal("NewLock")
 	}
+	err = lock1.SetCheckPeriod(2)
+	if err != nil {
+		log.Fatal("SetCheckPeriod")
+	}
 
 	lock2, err := models.NewLock("unique_lock_name_2", 10, 5)
 	if err != nil {
@@ -127,7 +131,7 @@ func captureLock(
 		msg = fmt.Sprintf("lock failed with error = %v", err)
 	}
 	if unlock {
-		defer locker.Unlock(lockCtx)
+		defer locker.Unlock(ctx, lockCtx)
 	}
 
 	fmt.Printf(

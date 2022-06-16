@@ -2,109 +2,154 @@ package mongosp
 
 import (
 	"context"
-	"log"
+	"errors"
+	"os"
 	"testing"
 	"time"
-	"os"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 
 	"github.com/nibi8/dlocker/models"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// todo: add tests
+const testDBName = "test"
+const testCollectionName = "lockerTest"
 
-func TestStorageProvider(t *testing.T) {
-
+func TestInit(t *testing.T) {
 	ctx := context.Background()
 
-	// connect to mongodb
+	db := initDB(ctx, t)
+
+	_ = db.Collection(testCollectionName).Drop(ctx)
+
+	sp, err := NewStorageProvider(ctx, db, testCollectionName)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, sp.db)
+	assert.NotEmpty(t, sp.collectionName)
+
+	cursor, err := db.Collection(testCollectionName).Indexes().List(ctx)
+	require.NoError(t, err)
+
+	indexFound := false
+	index := mongo.IndexSpecification{}
+	for cursor.Next(ctx) {
+		err = cursor.Decode(&index)
+		require.NoError(t, err)
+		v := index.KeysDocument.Lookup("jobname")
+		if v.Value != nil {
+			indexFound = true
+			assert.True(t, *index.Unique)
+		}
+	}
+
+	assert.True(t, indexFound)
+}
+
+func TestCreate(t *testing.T) {
+	ctx := context.Background()
+
+	db := initDB(ctx, t)
+
+	_ = db.Collection(testCollectionName).Drop(ctx)
+
+	sp, err := NewStorageProvider(ctx, db, testCollectionName)
+	require.NoError(t, err)
+
+	lock, err := models.NewLock("unique-lock-name", 60, 10)
+	require.NoError(t, err)
+
+	lr := models.NewLockRecord(lock)
+
+	err = sp.CreateLockRecord(ctx, lr)
+	require.NoError(t, err)
+
+	err = sp.CreateLockRecord(ctx, lr)
+	assert.True(t, errors.Is(err, models.ErrDuplicate))
+
+}
+
+func TestGet(t *testing.T) {
+	ctx := context.Background()
+
+	db := initDB(ctx, t)
+
+	_ = db.Collection(testCollectionName).Drop(ctx)
+
+	sp, err := NewStorageProvider(ctx, db, testCollectionName)
+	require.NoError(t, err)
+
+	lock, err := models.NewLock("unique-lock-name", 60, 10)
+	require.NoError(t, err)
+
+	_, err = sp.GetLockRecord(ctx, lock.Name)
+	assert.True(t, errors.Is(err, models.ErrNotFound))
+
+	lr := models.NewLockRecord(lock)
+	// fix for db representation
+	lr.Dt = time.Unix(time.Now().Unix(), 0).UTC()
+
+	err = sp.CreateLockRecord(ctx, lr)
+	require.NoError(t, err)
+
+	lrRed, err := sp.GetLockRecord(ctx, lock.Name)
+	require.NoError(t, err)
+
+	assert.Equal(t, lr, lrRed)
+}
+
+func TestUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	db := initDB(ctx, t)
+
+	_ = db.Collection(testCollectionName).Drop(ctx)
+
+	sp, err := NewStorageProvider(ctx, db, testCollectionName)
+	require.NoError(t, err)
+
+	lock, err := models.NewLock("unique-lock-name", 60, 10)
+	require.NoError(t, err)
+
+	lr := models.NewLockRecord(lock)
+
+	patch := models.NewLockRecordPatchForCapture(lr.DurationSec)
+	err = sp.UpdateLockRecord(ctx, lr.LockName, lr.Version, patch)
+	require.True(t, errors.Is(err, models.ErrNotFound))
+
+	err = sp.CreateLockRecord(ctx, lr)
+	require.NoError(t, err)
+
+	err = sp.UpdateLockRecord(ctx, lr.LockName, lr.Version, patch)
+	require.NoError(t, err)
+}
+
+func initDB(ctx context.Context, t *testing.T) *mongo.Database {
+
 	constr := "mongodb://localhost:27017"
-	
+
 	constrEnv, envFound := os.LookupEnv("MONGO_CON_STR")
 	if envFound {
 		constr = constrEnv
 	}
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(constr))
-	if err != nil {
-		log.Fatal("mongo.Connect")
-	}
+	opts := options.Client().ApplyURI(constr)
 
-	defer func() {
-		if err = client.Disconnect(ctx); err != nil {
-			panic(err)
-		}
-	}()
+	// recommended option to prevent collisions
+	opts = opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 
-	err = client.Ping(ctx, readpref.Primary())
-	if err != nil {
-		log.Fatal("client.Ping")
-	}
+	client, err := mongo.Connect(ctx, opts)
+	require.NoError(t, err)
 
-	db := client.Database("test")
+	err = client.Ping(ctx, nil)
+	require.NoError(t, err)
 
-	collectionName := "lockerTest"
+	db := client.Database(testDBName)
 
-	_ = db.Collection(collectionName).Drop(ctx)
-
-	// create storage provider
-	sp, err := NewStorageProvider(ctx, db, collectionName)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	lockName := "lock1"
-
-	lock, err := models.NewLock(lockName, 20, 10)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	lr := models.NewLockRecord(lock)
-	lr.Dt = time.Unix(time.Now().Unix(), 0).UTC() // fix golang and db format for later compare in tests
-
-	err = sp.CreateLockRecord(ctx, lr)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	lrResp, err := sp.GetLockRecord(ctx, lock.Name)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	if lr != lrResp {
-		t.Errorf("GetLockRecord result differs")
-		return
-	}
-
-	lrPatch := models.NewLockRecordPatchForCapture(lr.DurationSec)
-	lrPatch.Dt = time.Unix(time.Now().Unix(), 0).UTC() // fix golang and db format for later compare in tests
-
-	err = sp.UpdateLockRecord(ctx, lock.Name, lr.Version, lrPatch)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	lrUpdated, err := sp.GetLockRecord(ctx, lock.Name)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	lr.ApplyPatch(lrPatch)
-
-	if lr != lrUpdated {
-		t.Errorf("GetLockRecord (after UpdateLockRecord) result differs")
-		return
-	}
-
+	return db
 }
