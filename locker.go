@@ -76,6 +76,7 @@ func (s *LockerImp) LockWithWait(
 
 	if !lrFound {
 		lr = models.NewLockRecord(lock)
+		now := time.Now()
 		err = s.sp.CreateLockRecord(ctx, lr)
 		if err != nil {
 			if errors.Is(err, models.ErrDuplicate) {
@@ -84,12 +85,13 @@ func (s *LockerImp) LockWithWait(
 			return lockCtx, cancel, err
 		}
 
-		lockCtx, cancel = createLockCtx(ctx, lock, lr)
+		lockCtx, cancel = createLockCtx(ctx, lock, lr, now)
 
 		return lockCtx, cancel, nil
 	}
 
 	lrPatch := models.NewLockRecordPatchForCapture(lock.GetDurationSec())
+	now := time.Now()
 	err = s.sp.UpdateLockRecord(ctx, lock.Name, lr.Version, lrPatch)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) ||
@@ -101,7 +103,7 @@ func (s *LockerImp) LockWithWait(
 
 	lr.ApplyPatch(lrPatch)
 
-	lockCtx, cancel = createLockCtx(ctx, lock, lr)
+	lockCtx, cancel = createLockCtx(ctx, lock, lr, now)
 
 	return lockCtx, cancel, nil
 }
@@ -115,6 +117,7 @@ func (s *LockerImp) ExtendLock(
 	lock := lockCtx.GetLock()
 
 	lrPatch := models.NewLockRecordPatchForCapture(lr.DurationSec)
+	now := time.Now()
 	err = s.sp.UpdateLockRecord(ctx, lr.LockName, lr.Version, lrPatch)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) ||
@@ -126,7 +129,7 @@ func (s *LockerImp) ExtendLock(
 
 	lr.ApplyPatch(lrPatch)
 
-	newLockCtx, cancel = createLockCtx(ctx, lock, lr)
+	newLockCtx, cancel = createLockCtx(ctx, lock, lr, now)
 
 	return newLockCtx, cancel, nil
 }
@@ -152,9 +155,11 @@ func createLockCtx(
 	ctx context.Context,
 	lock models.Lock,
 	lr models.LockRecord,
+	now time.Time,
 ) (lockCtx LockContext, cancel context.CancelFunc) {
 
-	ctx, cancel = context.WithTimeout(ctx, time.Duration(lock.ExecutionDurationSec)*time.Second)
+	timeout := time.Duration(lock.ExecutionDurationSec) * time.Second
+	ctx, cancel = context.WithDeadline(ctx, now.Add(timeout))
 	lockCtx = NewLockContext(ctx, lock, lr)
 
 	return lockCtx, cancel
