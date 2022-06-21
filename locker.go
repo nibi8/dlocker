@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/nibi8/dlocker/models"
+	"github.com/p8bin/dlocker/models"
 )
 
 type LockerImp struct {

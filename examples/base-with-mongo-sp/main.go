@@ -13,9 +13,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 
-	"github.com/nibi8/dlocker"
-	"github.com/nibi8/dlocker/models"
-	"github.com/nibi8/dlocker/storageproviders/mongosp"
+	"github.com/p8bin/dlocker"
+	"github.com/p8bin/dlocker/models"
+	"github.com/p8bin/dlocker/storageproviders/mongosp"
 )
 
 func main() {

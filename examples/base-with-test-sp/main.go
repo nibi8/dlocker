@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nibi8/dlocker"
-	"github.com/nibi8/dlocker/models"
-	"github.com/nibi8/dlocker/storageproviders/testsp"
+	"github.com/p8bin/dlocker"
+	"github.com/p8bin/dlocker/models"
+	"github.com/p8bin/dlocker/storageproviders/testsp"
 )
 
 func main() {

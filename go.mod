@@ -1,4 +1,4 @@
-module github.com/nibi8/dlocker
+module github.com/p8bin/dlocker
 
 go 1.16
 

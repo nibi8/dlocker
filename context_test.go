@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/nibi8/dlocker/models"
+	"github.com/p8bin/dlocker/models"
 )
 
 func TestNewLockContext(t *testing.T) {
