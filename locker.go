@@ -8,12 +8,6 @@ import (
 	"github.com/nibi8/dlocker/models"
 )
 
-type contextKey string
-
-const (
-	lockLrContextKey contextKey = "lock_ctx_lr_key"
-)
-
 type LockerImp struct {
 	sp StorageProvider
 }
@@ -31,7 +25,7 @@ func NewLocker(
 func (s *LockerImp) LockWithWait(
 	ctx context.Context,
 	lock models.Lock,
-) (lockCtx context.Context, cancel context.CancelFunc, err error) {
+) (lockCtx LockContext, cancel context.CancelFunc, err error) {
 
 	lrFound := false
 	lr, err := s.sp.GetLockRecord(ctx, lock.Name)
@@ -49,16 +43,40 @@ func (s *LockerImp) LockWithWait(
 
 	if lrFound && lr.State.IsLock() && lr.DurationSec > 0 {
 		dur := time.Duration(lr.DurationSec) * time.Second
-		select {
-		case <-ctx.Done():
-			return lockCtx, cancel, ctx.Err()
-		case <-time.After(dur):
-			// continue
+	loop:
+		for {
+			var after <-chan time.Time
+			if lock.CheckPeriodSec > 0 {
+				after = time.After(time.Duration(lock.CheckPeriodSec) * time.Second)
+			}
+			select {
+			case <-ctx.Done():
+				return lockCtx, cancel, ctx.Err()
+			case <-time.After(dur):
+				break loop
+			case <-after:
+				if lrCheck, err := s.sp.GetLockRecord(ctx, lock.Name); err != nil {
+					if !errors.Is(err, models.ErrNotFound) {
+						// for storages with ttl keys
+						lrFound = false
+						break loop
+					}
+					// todo: ? process err
+				} else {
+					if lr.Version != lrCheck.Version {
+						return lockCtx, cancel, models.ErrNoLuck
+					}
+					if lr.State == models.LockRecordStateUnlock {
+						break loop
+					}
+				}
+			}
 		}
 	}
 
 	if !lrFound {
 		lr = models.NewLockRecord(lock)
+		now := time.Now()
 		err = s.sp.CreateLockRecord(ctx, lr)
 		if err != nil {
 			if errors.Is(err, models.ErrDuplicate) {
@@ -67,13 +85,13 @@ func (s *LockerImp) LockWithWait(
 			return lockCtx, cancel, err
 		}
 
-		// todo: ? init of lockCtx create or update
-		lockCtx, cancel = newLockCtx(ctx, lock, lr)
+		lockCtx, cancel = createLockCtx(ctx, lock, lr, now)
 
 		return lockCtx, cancel, nil
 	}
 
 	lrPatch := models.NewLockRecordPatchForCapture(lock.GetDurationSec())
+	now := time.Now()
 	err = s.sp.UpdateLockRecord(ctx, lock.Name, lr.Version, lrPatch)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) ||
@@ -85,28 +103,44 @@ func (s *LockerImp) LockWithWait(
 
 	lr.ApplyPatch(lrPatch)
 
-	// todo: ? init of lockCtx create or update
-	lockCtx, cancel = newLockCtx(ctx, lock, lr)
+	lockCtx, cancel = createLockCtx(ctx, lock, lr, now)
 
 	return lockCtx, cancel, nil
 }
 
+func (s *LockerImp) ExtendLock(
+	ctx context.Context,
+	lockCtx LockContext,
+) (newLockCtx LockContext, cancel context.CancelFunc, err error) {
+
+	lr := lockCtx.GetLockRecord()
+	lock := lockCtx.GetLock()
+
+	lrPatch := models.NewLockRecordPatchForCapture(lr.DurationSec)
+	now := time.Now()
+	err = s.sp.UpdateLockRecord(ctx, lr.LockName, lr.Version, lrPatch)
+	if err != nil {
+		if errors.Is(err, models.ErrNotFound) ||
+			errors.Is(err, models.ErrNotSupported) {
+			return newLockCtx, cancel, models.ErrNoLuck
+		}
+		return newLockCtx, cancel, err
+	}
+
+	lr.ApplyPatch(lrPatch)
+
+	newLockCtx, cancel = createLockCtx(ctx, lock, lr, now)
+
+	return newLockCtx, cancel, nil
+}
+
 func (s *LockerImp) Unlock(
-	lockCtx context.Context,
+	ctx context.Context,
+	lockCtx LockContext,
 ) (err error) {
 
-	val := lockCtx.Value(lockLrContextKey)
-	if val == nil {
-		return nil
-	}
-
-	lr, ok := val.(models.LockRecord)
-	if !ok {
-		return nil
-	}
-
-	lrPatch := models.NewLockRecordPatchForRelease(lr.Version)
-	err = s.sp.UpdateLockRecord(lockCtx, lr.LockName, lr.Version, lrPatch)
+	lrPatch := models.NewLockRecordPatchForRelease(lockCtx.GetLockRecord().Version)
+	err = s.sp.UpdateLockRecord(ctx, lockCtx.GetLockRecord().LockName, lockCtx.GetLockRecord().Version, lrPatch)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) ||
 			errors.Is(err, models.ErrNotSupported) {
@@ -117,14 +151,16 @@ func (s *LockerImp) Unlock(
 	return nil
 }
 
-func newLockCtx(
+func createLockCtx(
 	ctx context.Context,
 	lock models.Lock,
 	lr models.LockRecord,
-) (lockCtx context.Context, cancel context.CancelFunc) {
+	now time.Time,
+) (lockCtx LockContext, cancel context.CancelFunc) {
 
-	lockCtx, cancel = context.WithTimeout(ctx, time.Duration(lock.ExecutionDurationSec)*time.Second)
-	lockCtx = context.WithValue(lockCtx, lockLrContextKey, lr)
+	timeout := time.Duration(lock.ExecutionDurationSec) * time.Second
+	ctx, cancel = context.WithDeadline(ctx, now.Add(timeout))
+	lockCtx = NewLockContext(ctx, lock, lr)
 
 	return lockCtx, cancel
 }

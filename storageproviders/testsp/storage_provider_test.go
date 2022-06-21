@@ -2,65 +2,76 @@ package testsp
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/nibi8/dlocker/models"
 )
 
-// todo: add tests
+func TestInit(t *testing.T) {
+	_ = NewStorageProvider()
+}
 
-func TestStorageProvider(t *testing.T) {
-
+func TestCreate(t *testing.T) {
 	ctx := context.Background()
 
 	sp := NewStorageProvider()
 
-	jobName := "job1"
+	lock, err := models.NewLock("unique-lock-name", 60, 10)
+	require.NoError(t, err)
 
-	job, err := models.NewLock(jobName, 20, 10)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	lr := models.NewLockRecord(job)
+	lr := models.NewLockRecord(lock)
 
 	err = sp.CreateLockRecord(ctx, lr)
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	require.NoError(t, err)
 
-	lrResp, err := sp.GetLockRecord(ctx, job.Name)
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	err = sp.CreateLockRecord(ctx, lr)
+	assert.True(t, errors.Is(err, models.ErrDuplicate))
 
-	if lr != lrResp {
-		t.Errorf("GetLockRecord result differs")
-		return
-	}
+}
 
-	lrPatch := models.NewLockRecordPatchForCapture(lr.DurationSec)
+func TestGet(t *testing.T) {
+	ctx := context.Background()
 
-	err = sp.UpdateLockRecord(ctx, job.Name, lr.Version, lrPatch)
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	sp := NewStorageProvider()
 
-	lrUpdated, err := sp.GetLockRecord(ctx, job.Name)
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	lock, err := models.NewLock("unique-lock-name", 60, 10)
+	require.NoError(t, err)
 
-	lr.ApplyPatch(lrPatch)
+	_, err = sp.GetLockRecord(ctx, lock.Name)
+	assert.True(t, errors.Is(err, models.ErrNotFound))
 
-	if lr != lrUpdated {
-		t.Errorf("GetLockRecord (after UpdateLockRecord) result differs")
-		return
-	}
+	lr := models.NewLockRecord(lock)
 
+	err = sp.CreateLockRecord(ctx, lr)
+	require.NoError(t, err)
+
+	lrRed, err := sp.GetLockRecord(ctx, lock.Name)
+	require.NoError(t, err)
+
+	assert.Equal(t, lr, lrRed)
+}
+
+func TestUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	sp := NewStorageProvider()
+
+	lock, err := models.NewLock("unique-lock-name", 60, 10)
+	require.NoError(t, err)
+
+	lr := models.NewLockRecord(lock)
+
+	patch := models.NewLockRecordPatchForCapture(lr.DurationSec)
+	err = sp.UpdateLockRecord(ctx, lr.LockName, lr.Version, patch)
+	require.True(t, errors.Is(err, models.ErrNotFound))
+
+	err = sp.CreateLockRecord(ctx, lr)
+	require.NoError(t, err)
+
+	err = sp.UpdateLockRecord(ctx, lr.LockName, lr.Version, patch)
+	require.NoError(t, err)
 }

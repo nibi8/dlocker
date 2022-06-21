@@ -13,6 +13,17 @@ type Lock struct {
 
 	// Interval between locks execution in seconds
 	SpanDurationSec int
+
+	// Additional lock check period
+	CheckPeriodSec int
+}
+
+func (l *Lock) SetCheckPeriod(checkPeriodSec int) (err error) {
+	if checkPeriodSec < 0 {
+		return ErrBadParam
+	}
+	l.CheckPeriodSec = checkPeriodSec
+	return nil
 }
 
 func (j Lock) Validate() (err error) {

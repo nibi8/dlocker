@@ -12,12 +12,25 @@ type Locker interface {
 	LockWithWait(
 		ctx context.Context,
 		lock models.Lock,
-	) (lockCtx context.Context, cancel context.CancelFunc, err error)
+	) (lockCtx LockContext, cancel context.CancelFunc, err error)
+
+	// Extend existing lock
+	ExtendLock(
+		ctx context.Context,
+		lockCtx LockContext,
+	) (newLockCtx LockContext, cancel context.CancelFunc, err error)
 
 	// Release lock or return ErrNoLuck if no luck or an unexpected error occurs
 	Unlock(
-		lockCtx context.Context,
+		ctx context.Context,
+		lockCtx LockContext,
 	) (err error)
+}
+
+// Extends existing lock
+type LockExtender interface {
+	LockWithWait(ctx context.Context) (exCtx context.Context, err error)
+	Unlock(ctx context.Context, wait bool)
 }
 
 // Creates lock records in a persistent storage.
@@ -42,4 +55,12 @@ type StorageProvider interface {
 		version string,
 		patch models.LockRecordPatch,
 	) (err error)
+}
+
+// Lock context
+type LockContext interface {
+	context.Context
+
+	GetLock() models.Lock
+	GetLockRecord() models.LockRecord
 }
