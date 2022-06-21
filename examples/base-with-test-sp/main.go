@@ -66,9 +66,6 @@ func main() {
 	}()
 
 	wg.Wait()
-
-	//<-ctx.Done()
-
 }
 
 func captureLock(

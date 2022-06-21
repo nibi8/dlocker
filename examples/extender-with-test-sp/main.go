@@ -4,59 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
-
 	"github.com/nibi8/dlocker"
 	"github.com/nibi8/dlocker/models"
-	"github.com/nibi8/dlocker/storageproviders/mongosp"
+	"github.com/nibi8/dlocker/storageproviders/testsp"
 )
 
 func main() {
 
-	ctx := context.Background()
-
-	// connect to mongodb
-	constr := "mongodb://localhost:27017"
-
-	constrEnv, envFound := os.LookupEnv("MONGO_CON_STR")
-	if envFound {
-		constr = constrEnv
-	}
-
-	opts := options.Client().ApplyURI(constr)
-	// recommended option to prevent collisions
-	opts = opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
-	client, err := mongo.Connect(ctx, opts)
-	if err != nil {
-		log.Fatal("mongo.Connect")
-	}
-
-	defer func() {
-		if err = client.Disconnect(ctx); err != nil {
-			panic(err)
-		}
-	}()
-
-	err = client.Ping(ctx, readpref.Primary())
-	if err != nil {
-		fmt.Println(err)
-		log.Fatal("client.Ping")
-	}
-
-	db := client.Database("test")
-
 	// create storage provider
-	sp, err := mongosp.NewStorageProvider(ctx, db, "lockerTest")
-	if err != nil {
-		log.Fatal("mongosp.NewStorageProvider")
-	}
+	sp := testsp.NewStorageProvider()
 
 	// create locker
 	locker := dlocker.NewLocker(sp)
@@ -71,11 +30,13 @@ func main() {
 	if err != nil {
 		log.Fatal("SetCheckPeriod")
 	}
+	lockEx1 := dlocker.NewLockExtender(locker, lock1, 0)
 
 	lock2, err := models.NewLock("unique_lock_name_2", 10, 5)
 	if err != nil {
 		log.Fatal("NewLock")
 	}
+	lockEx2 := dlocker.NewLockExtender(locker, lock2, 4)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -86,24 +47,40 @@ func main() {
 	// lock1:
 	go func() {
 		defer wg.Done()
-		captureLock(ctx, locker, lock1, "instace_1", false)
+		exCtx, err := captureLock(ctx, locker, lock1, "instace_1", false, lockEx1)
+		if err != nil {
+			return
+		}
+		<-exCtx.Done()
 
 	}()
 	go func() {
 		defer wg.Done()
 		time.Sleep(1 * time.Second)
-		captureLock(ctx, locker, lock1, "instace_2", false)
+		exCtx, err := captureLock(ctx, locker, lock1, "instace_2", false, lockEx1)
+		if err != nil {
+			return
+		}
+		<-exCtx.Done()
 	}()
 
 	// lock2 with manual unlock:
 	go func() {
 		defer wg.Done()
-		captureLock(ctx, locker, lock2, "instace_1", true)
+		exCtx, err := captureLock(ctx, locker, lock2, "instace_1", true, lockEx2)
+		if err != nil {
+			return
+		}
+		<-exCtx.Done()
 	}()
 	go func() {
 		defer wg.Done()
 		time.Sleep(1 * time.Second)
-		captureLock(ctx, locker, lock2, "instace_2", true)
+		exCtx, err := captureLock(ctx, locker, lock2, "instace_2", true, lockEx2)
+		if err != nil {
+			return
+		}
+		<-exCtx.Done()
 	}()
 
 	wg.Wait()
@@ -115,7 +92,8 @@ func captureLock(
 	lock models.Lock,
 	instanceName string,
 	unlock bool,
-) {
+	ex dlocker.LockExtender,
+) (exCtx context.Context, err error) {
 
 	lockPrintName := lock.Name
 	if instanceName != "" {
@@ -123,12 +101,15 @@ func captureLock(
 	}
 
 	msg := "lock success"
-	lockCtx, _, err := locker.LockWithWait(ctx, lock)
+	exCtx, err = ex.LockWithWait(ctx)
 	if err != nil {
 		msg = fmt.Sprintf("lock failed with error = %v", err)
 	}
 	if unlock {
-		defer locker.Unlock(ctx, lockCtx)
+		go func() {
+			time.Sleep(10 * time.Second)
+			ex.Unlock(ctx, true)
+		}()
 	}
 
 	fmt.Printf(
@@ -138,4 +119,5 @@ func captureLock(
 		msg,
 	)
 
+	return exCtx, err
 }
