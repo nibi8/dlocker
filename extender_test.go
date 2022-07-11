@@ -24,8 +24,8 @@ func TestFiniteExtends(t *testing.T) {
 
 	lock, err := models.NewLock(
 		"unique-lock-name",
-		10,
-		2,
+		4,
+		1,
 	)
 	require.NoError(t, err)
 
@@ -54,8 +54,8 @@ func TestInfiniteExtends(t *testing.T) {
 
 	lock, err := models.NewLock(
 		"unique-lock-name",
-		10,
-		2,
+		4,
+		1,
 	)
 	require.NoError(t, err)
 
@@ -65,7 +65,7 @@ func TestInfiniteExtends(t *testing.T) {
 	require.NoError(t, err)
 
 	go func() {
-		time.Sleep(30 * time.Second)
+		time.Sleep(25 * time.Second)
 		lockEx.Unlock(ctx, true)
 	}()
 
@@ -89,8 +89,8 @@ func TestInit(t *testing.T) {
 
 	lock, err := models.NewLock(
 		"unique-lock-name",
-		10,
-		2,
+		4,
+		1,
 	)
 	require.NoError(t, err)
 
