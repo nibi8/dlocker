@@ -21,6 +21,19 @@ func TestNewLock(t *testing.T) {
 	assert.Empty(t, lock.CheckPeriodSec)
 }
 
+func TestNewLockPnc(t *testing.T) {
+	lock := NewLockPnc(
+		"unique-lock-name",
+		60,
+		10,
+	)
+
+	assert.NotEmpty(t, lock.Name)
+	assert.NotEmpty(t, lock.ExecutionDurationSec)
+	assert.NotEmpty(t, lock.SpanDurationSec)
+	assert.Empty(t, lock.CheckPeriodSec)
+}
+
 func TestLockSetCheckPeriod(t *testing.T) {
 	lock, err := NewLock(
 		"unique-lock-name",

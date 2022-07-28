@@ -47,6 +47,22 @@ func (j Lock) GetDurationSec() int {
 	return j.ExecutionDurationSec + j.SpanDurationSec
 }
 
+func NewLockPnc(
+	name string,
+	executionDurationSec int,
+	spanDurationSec int,
+) (lock Lock) {
+	lock, err := NewLock(
+		name,
+		executionDurationSec,
+		spanDurationSec,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return lock
+}
+
 func NewLock(
 	name string,
 	executionDurationSec int,
